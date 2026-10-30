@@ -21,7 +21,7 @@ import msgpack
 import redis.asyncio as aioredis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.v1.endpoints.events import to_out
+from src.api.v1.endpoints.events import person_names, to_out
 from src.core.config import get_settings
 from src.db.session import SessionLocal
 from src.models import Camera, Event
@@ -81,7 +81,8 @@ async def handle(session: AsyncSession, msg: dict) -> Event | None:
     cam.last_event_at = event.occurred_at
     await session.commit()
     names = {cam.id: cam.name}
-    await live.publish(cam.tenant_id, "event", to_out(event, names).model_dump(mode="json"))
+    people = await person_names(session, cam.tenant_id, [event])
+    await live.publish(cam.tenant_id, "event", to_out(event, names, people).model_dump(mode="json"))
     return event
 
 

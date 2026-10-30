@@ -25,7 +25,7 @@ from sqlalchemy import select
 from src.core.config import get_settings
 from src.core.security import encrypt, hash_password, new_opaque_token, redact_url, token_digest, utcnow
 from src.db.session import SessionLocal
-from src.models import Camera, CameraStatus, EdgeAgent, Plan, Role, SourceMode, Tenant, User
+from src.models import Camera, CameraStatus, EdgeAgent, Person, Plan, Role, SourceMode, Tenant, User
 
 logger = logging.getLogger("demo")
 
@@ -34,13 +34,16 @@ VIEWER_EMAIL = "viewer@openvision.dev"
 DEMO_PASSWORD = "demo-password-1"  # dev only; seed refuses to run in prod
 CROPS, FRAMES = 12, 4
 KNOWN_PEOPLE = [str(uuid.UUID(int=i)) for i in range(1, 6)]
+KNOWN_NAMES = ["Aigerim Sadykova", "Bolat Nurlanov", "Dana Ospanova", "Yerlan Akhmetov", "Madina Bekova"]
 
 
 async def seed() -> None:
     if get_settings().environment == "prod":
         sys.exit("refusing to seed demo data in prod")
     async with SessionLocal() as session:
-        if (await session.execute(select(User).where(User.email == DEMO_EMAIL))).scalar_one_or_none():
+        owner = (await session.execute(select(User).where(User.email == DEMO_EMAIL))).scalar_one_or_none()
+        if owner:
+            await _seed_persons(session, owner.tenant_id)
             print("demo account exists")
             return
         tenant = Tenant(name="Demo Retail LLP", plan=Plan.FACE, max_cameras=10, retention_days=30)
@@ -67,8 +70,18 @@ async def seed() -> None:
                    status=CameraStatus.OFFLINE, status_reason="no_video", stream_info={**hd, "fps": 12.0},
                    last_seen_at=utcnow() - timedelta(hours=3)),
         ])  # fmt: skip
+        await _seed_persons(session, tenant.id)
         await session.commit()
     print(f"demo account: {DEMO_EMAIL} / {DEMO_PASSWORD} (owner), {VIEWER_EMAIL} / {DEMO_PASSWORD} (viewer)")
+
+
+async def _seed_persons(session, tenant_id: uuid.UUID) -> None:
+    """Known persons whose ids the simulator uses; the photos are placeholder crops."""
+    if (await session.execute(select(Person.id).where(Person.tenant_id == tenant_id).limit(1))).first():
+        return
+    for i, (pid, name) in enumerate(zip(KNOWN_PEOPLE, KNOWN_NAMES)):
+        session.add(Person(id=uuid.UUID(pid), tenant_id=tenant_id, name=name, photo_key=f"face-crops-bucket/demo/{i}.jpg"))
+    await session.commit()
 
 
 def ensure_media(root: Path) -> None:
@@ -86,11 +99,11 @@ def ensure_media(root: Path) -> None:
                 )  # fmt: skip
 
 
-def fake_message(camera_id: int) -> dict:
+def fake_message(camera_id: int, known_people: list[str] | None = None) -> dict:
     """Same keys as trt-processor's `message` in revised_bg_worker.process_event."""
     s = get_settings()
     known = random.random() < 0.35
-    person = random.choice(KNOWN_PEOPLE) if known else str(uuid.uuid4())
+    person = random.choice(known_people or KNOWN_PEOPLE) if known else str(uuid.uuid4())
     base = f"http://{s.ingest_public_host}:9000"
     x, y, w = random.randint(100, 1500), random.randint(80, 700), random.randint(60, 180)
     return {
@@ -115,15 +128,20 @@ async def simulate(interval: float = 4.0) -> None:
     logger.info("emitting a fake event every ~%ss to %s", interval, s.pipeline_output_stream)
     while True:
         async with SessionLocal() as session:
-            ids = (
+            cams = (
                 await session.execute(
-                    select(Camera.id).where(
+                    select(Camera.id, Camera.tenant_id).where(
                         Camera.enabled.is_(True), Camera.deleted.is_(False), Camera.status == CameraStatus.ONLINE
                     )
                 )
-            ).scalars().all()
-        if ids:
-            msg = fake_message(random.choice(ids))
+            ).all()
+            if cams:
+                camera_id, tenant_id = random.choice(cams)
+                # persons enrolled in the app get "recognised" too
+                people = (await session.execute(select(Person.id).where(Person.tenant_id == tenant_id))).scalars()
+                people = [str(x) for x in people]
+        if cams:
+            msg = fake_message(camera_id, people)
             await r.xadd(s.pipeline_output_stream, {"data": zlib.compress(msgpack.packb(msg, use_bin_type=True))})
         await asyncio.sleep(random.uniform(interval * 0.5, interval * 1.5))
 

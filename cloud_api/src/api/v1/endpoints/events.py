@@ -7,12 +7,13 @@ import jwt
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy import and_, distinct, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import Principal, require
 from src.core.config import get_settings
 from src.core.errors import AppError, not_found
 from src.core.security import MEDIA, decode_token, utcnow
-from src.models import Camera, CameraStatus, Event
+from src.models import Camera, CameraStatus, Event, Person
 from src.schemas import Bucket, CameraCount, EventOut, Page, StatsOut
 from src.services import media
 from src.services.tokens import as_utc
@@ -36,7 +37,21 @@ def _decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
         raise AppError(400, "invalid_cursor", "cursor is not valid")
 
 
-def to_out(e: Event, camera_names: dict[int, str]) -> EventOut:
+async def person_names(session: AsyncSession, tenant_id: uuid.UUID, events) -> dict[str, str]:
+    ids = set()
+    for e in events:
+        if e.is_known and e.person_id:
+            try:
+                ids.add(uuid.UUID(e.person_id))
+            except ValueError:
+                pass
+    if not ids:
+        return {}
+    rows = await session.execute(select(Person.id, Person.name).where(Person.tenant_id == tenant_id, Person.id.in_(ids)))
+    return {str(pid): name for pid, name in rows.all()}
+
+
+def to_out(e: Event, camera_names: dict[int, str], names: dict[str, str] | None = None) -> EventOut:
     has_media = bool(e.crop_key or e.frame_key)
     return EventOut(
         id=e.id,
@@ -45,6 +60,7 @@ def to_out(e: Event, camera_names: dict[int, str]) -> EventOut:
         kind=e.kind,
         occurred_at=as_utc(e.occurred_at),
         person_id=e.person_id,
+        person_name=(names or {}).get(e.person_id or ""),
         is_known=e.is_known,
         confidence=e.confidence,
         bbox=e.bbox,
@@ -93,7 +109,8 @@ async def list_events(
         q = q.where(or_(Event.occurred_at < ts, and_(Event.occurred_at == ts, Event.id < eid)))
     rows = await p.scope.list(q.order_by(Event.occurred_at.desc(), Event.id.desc()).limit(limit + 1))
     names = await _camera_names(p)
-    items = [to_out(e, names) for e in rows[:limit]]
+    people = await person_names(p.scope.session, p.tenant.id, rows[:limit])
+    items = [to_out(e, names, people) for e in rows[:limit]]
     next_cursor = _encode_cursor(rows[limit - 1]) if len(rows) > limit else None
     return Page[EventOut](items=items, next_cursor=next_cursor)
 
@@ -101,7 +118,7 @@ async def list_events(
 @router.get("/{event_id}", response_model=EventOut)
 async def get_event(event_id: uuid.UUID, p: Principal = Depends(require("events.read"))):
     e = await p.scope.get(Event, event_id, "event")
-    return to_out(e, await _camera_names(p))
+    return to_out(e, await _camera_names(p), await person_names(p.scope.session, p.tenant.id, [e]))
 
 
 def _hour_bucket(session):

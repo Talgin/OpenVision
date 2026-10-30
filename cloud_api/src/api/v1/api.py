@@ -1,12 +1,13 @@
 from fastapi import APIRouter
 
-from src.api.v1.endpoints import auth, cameras, edge, events, ingest_hook, live, misc, users
+from src.api.v1.endpoints import auth, cameras, edge, events, ingest_hook, live, misc, persons, users
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(cameras.router, prefix="/cameras", tags=["cameras"])
 api_router.include_router(edge.router, prefix="/edge-agents", tags=["edge agents"])
+api_router.include_router(persons.router, prefix="/persons", tags=["persons"])
 api_router.include_router(events.router, prefix="/events", tags=["events"])
 api_router.include_router(events.stats_router, prefix="/stats", tags=["events"])
 api_router.include_router(events.media_router, prefix="/media", tags=["events"])

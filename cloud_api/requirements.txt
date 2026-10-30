@@ -14,3 +14,4 @@ msgpack==1.1.0
 httpx==0.28.1
 minio==7.2.12
 alembic==1.14.0
+python-multipart==0.0.20

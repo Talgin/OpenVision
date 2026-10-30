@@ -30,9 +30,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import get_settings
 from src.core.security import decrypt, utcnow
 from src.db.session import SessionLocal
-from src.models import Camera, CameraStatus, Device, EdgeAgent, Event, GpuNode, SourceMode, Tenant
+from src.models import Camera, CameraStatus, Device, EdgeAgent, Event, GpuNode, Person, SourceMode, Tenant
 from src.schemas import CameraOut
-from src.services import ingest, live, probe
+from src.services import faces, ingest, live, media, probe
 from src.services.ingest import MediaMTX
 from src.services.streamer import Streamer, StreamerError
 from src.services.tokens import as_utc
@@ -104,8 +104,8 @@ class Scheduler:
                     logger.exception("camera %s: ingest remove failed", c.id)
                     continue
             if c.deleted and not c.gpu_node_id:
-                # explicit, not only ON DELETE CASCADE: SQLite does not enforce it
-                await session.execute(delete(Event).where(Event.camera_id == c.id))
+                # explicit, not only ON DELETE CASCADE: the images go too
+                await purge_events(session, Event.camera_id == c.id)
                 await session.delete(c)
                 logger.info("camera %s purged", c.id)
         await session.flush()
@@ -119,7 +119,13 @@ class Scheduler:
             )
         ).scalars()
         for t in gone:
-            for model in (Event, Device):  # users and their tokens went at deletion time
+            # faces first: if trt_api is unreachable the tenant stays, and this retries
+            if not await faces.purge_tenant(t.id):
+                continue
+            photos = (await session.execute(select(Person.photo_key).where(Person.tenant_id == t.id))).scalars()
+            await asyncio.to_thread(media.remove, list(photos))
+            await purge_events(session, Event.tenant_id == t.id)
+            for model in (Device, Person):  # users and their tokens went at deletion time
                 await session.execute(delete(model).where(model.tenant_id == t.id))
             await session.delete(t)
             logger.info("tenant %s purged", t.id)
@@ -305,8 +311,22 @@ class Scheduler:
     async def _retention(self, session) -> None:
         for t in (await session.execute(select(Tenant))).scalars():
             cutoff = utcnow() - timedelta(days=t.retention_days)
-            await session.execute(delete(Event).where(Event.tenant_id == t.id, Event.occurred_at < cutoff))
+            await purge_events(session, Event.tenant_id == t.id, Event.occurred_at < cutoff)
         await session.commit()
+
+
+async def purge_events(session: AsyncSession, *where) -> int:
+    """Delete matching events with their crop and frame images, in batches."""
+    n = 0
+    while True:
+        rows = (await session.execute(select(Event.id, Event.crop_key, Event.frame_key).where(*where).limit(1000))).all()
+        if not rows:
+            return n
+        if get_settings().media_delete_with_events:
+            # files before rows: a crash in between leaves a dead link, never an orphan image
+            await asyncio.to_thread(media.remove, {k for _, crop, frame in rows for k in (crop, frame) if k})
+        await session.execute(delete(Event).where(Event.id.in_([r[0] for r in rows])))
+        n += len(rows)
 
 
 async def run() -> None:

@@ -18,6 +18,9 @@ x-env: &env
   OV_PUBLIC_BASE_URL: ${OV_PUBLIC_BASE_URL:-http://localhost:8000}
   OV_INGEST_PUBLIC_HOST: localhost
   OV_DEFAULT_MAX_CAMERAS: "10"
+  OV_DEFAULT_PLAN: face  # so a self-registered test company can enroll persons
+  OV_FACE_API_URL: demo  # photos are stored, nobody is really recognised
+  OV_MEDIA_DELETE_WITH_EVENTS: "false"  # simulated events share placeholder images
 
 x-app: &app
   build: ../cloud_api

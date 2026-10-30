@@ -17,11 +17,14 @@ from src.repositories import TenantScope
 # What each role may do. The mobile app hides UI from `permissions` in GET /me;
 # the server enforces the same table.
 PERMISSIONS: dict[Role, frozenset[str]] = {
-    Role.VIEWER: frozenset({"cameras.read", "events.read"}),
-    Role.OPERATOR: frozenset({"cameras.read", "cameras.control", "events.read"}),
+    Role.VIEWER: frozenset({"cameras.read", "events.read", "persons.read"}),
+    Role.OPERATOR: frozenset({"cameras.read", "cameras.control", "events.read", "persons.read"}),
     Role.ADMIN: frozenset(
-        {"cameras.read", "cameras.control", "cameras.write", "events.read", "users.read", "users.write", "audit.read"}
-    ),
+        {
+            "cameras.read", "cameras.control", "cameras.write", "events.read", "persons.read", "persons.write",
+            "users.read", "users.write", "audit.read",
+        }
+    ),  # fmt: skip
 }
 PERMISSIONS[Role.OWNER] = PERMISSIONS[Role.ADMIN] | {"account.write"}
 

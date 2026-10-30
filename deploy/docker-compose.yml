@@ -26,6 +26,7 @@ x-env: &env
   OV_MINIO_ACCESS_KEY: ${OV_MINIO_ACCESS_KEY}
   OV_MINIO_SECRET_KEY: ${OV_MINIO_SECRET_KEY}
   OV_CORS_ORIGINS: ${OV_CORS_ORIGINS}
+  OV_FACE_API_URL: ${OV_FACE_API_URL:-}   # trt_api (branch feat/multi-tenant); empty = no enrollment
 
 x-app: &app
   build: ../cloud_api

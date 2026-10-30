@@ -58,7 +58,28 @@ processor. For the cloud it must run with `MULTI_TENANT=true`, from branch
   known faces enrolled before the change, which have no tenant, never match.
 
 The same branch fixes unknown people getting a new id on every sighting.
-Body-only tenants are unaffected: the scheduler never places them on a face node.
+Cloud cameras carry no face categories, so for them the tenant alone is the
+scope of a search. Body-only tenants are unaffected: the scheduler never
+places them on a face node.
+
+## Known persons and erasure
+
+`/api/v1/persons` enrolls a face through trt_api, branch `feat/multi-tenant`
+(not merged yet), which stores the tenant id on the face; `Person.id` is the
+`person_id` in Milvus and in events. Set `OV_FACE_API_URL` to trt_api on the
+GPU side network; it has no authentication of its own, so never expose it.
+
+What is erased, and when:
+
+| what | when | how |
+|---|---|---|
+| a person's face rows and photo | person deleted | trt_api `/delete_face/` |
+| event crops and frames | event expires (retention), camera deleted, company deleted | scheduler, `purge_events` |
+| every face of a company: known, unknown, historical | company deleted | trt_api `/delete_tenant/`; the company row stays until this succeeds |
+
+Not yet erased: the unknown and historical embeddings of a company that still
+exists are kept beyond its retention period, and trt-processor's MongoDB
+copy of events has no tenant id.
 
 ## Database changes
 
@@ -71,8 +92,8 @@ The API container runs `alembic upgrade head` before it starts.
 
 ## Not done yet
 
-Sending push notifications (needs the Firebase project), the persons API
-(enrolling known faces per tenant, through trt_api), publishing the
-edge-agent image to a registry, the Stage 0 measurements on a real VPS, and
-a run with a real DeepStream node. The scheduler has been run against a stand-in
+Sending push notifications (needs the Firebase project), publishing the
+edge-agent image to a registry, the Stage 0 measurements on a real VPS, a run
+with a real DeepStream node and trt_api, the customer web app, and metering
+for billing. The scheduler has been run against a stand-in
 that implements the same REST API.

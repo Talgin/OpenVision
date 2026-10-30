@@ -190,6 +190,19 @@ class Device(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Person(Base):
+    """A known face. The id is the person_id in trt_api / Milvus and in events."""
+
+    __tablename__ = "persons"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    note: Mapped[str | None] = mapped_column(String(500))
+    photo_key: Mapped[str | None] = mapped_column(String(500))  # "<bucket>/<person_id>/<embedding_id>.jpg"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class AuditLog(Base):
     """Security events. Never put tokens, passwords, URLs or personal data in meta."""
 

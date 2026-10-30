@@ -256,6 +256,7 @@ class EventOut(BaseModel):
     kind: str
     occurred_at: datetime
     person_id: str | None
+    person_name: str | None = None  # set when person_id is one of the tenant's persons
     is_known: bool
     confidence: float | None
     bbox: list[float] | None
@@ -263,6 +264,22 @@ class EventOut(BaseModel):
     frame_url: str | None
     media_expires_at: datetime | None
     attributes: dict | None
+
+
+class PersonOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    note: str | None
+    photo_url: str | None
+    media_expires_at: datetime | None
+    created_at: datetime
+
+
+class PersonUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    note: str | None = Field(default=None, max_length=500)  # null clears
+
+    check_not_null = field_validator("name", mode="before")(_no_null)
 
 
 class CameraCount(BaseModel):

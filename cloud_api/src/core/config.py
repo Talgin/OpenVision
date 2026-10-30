@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     minio_access_key: str = ""
     minio_secret_key: str = ""
     minio_secure: bool = False
+    # Off only where events share placeholder images (the demo simulator)
+    media_delete_with_events: bool = True
+
+    # Known faces: trt_api enrolls photos into the Milvus that trt-processor
+    # searches. "" turns enrollment off, "demo" keeps the photo locally and
+    # recognises nobody (client-app development without a GPU).
+    face_api_url: str = ""
+    face_api_timeout_seconds: float = 30
+    face_photos_bucket: str = "database-photos-bucket"  # trt_api MINIO_FACES_BUCKET
+    max_photo_bytes: int = 5 * 1024 * 1024
+    max_persons: int = 500  # per tenant
 
     # Default quotas for a new tenant
     default_max_cameras: int = 4

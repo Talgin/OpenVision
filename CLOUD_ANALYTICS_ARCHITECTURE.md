@@ -222,20 +222,26 @@ Stage 0 — feasibility (days)
 - [ ] Repeat with WireGuard instead of a push (edge-agent variant)
 
 Stage 1 — one tenant, end to end (weeks)
-- [ ] mediamtx in our DC as the real ingest, pull + push paths
-- [ ] Camera registry (Postgres) and an API to add / remove / validate a camera
-- [ ] Scheduler: camera -> GPU slot -> worker job, with health and restart
-- [ ] Results visible in a web UI behind login
+- [x] mediamtx as the real ingest, pull + push paths (`ingest/`, HTTP auth hook)
+- [x] Camera registry (Postgres) and an API to add / remove / validate a camera
+- [x] Scheduler: camera -> GPU slot -> worker job, with health and restart
+- [ ] Run against a real DeepStream node (so far: a stand-in with the same REST API)
+- [ ] Results visible in a web UI behind login (the API is there; the web app is not)
 
 Stage 2 — multi-tenant
-- [ ] `tenant_id` end to end; Milvus partitions per tenant; MinIO prefixes
-- [ ] Credential storage (Vault or encrypted columns), never in logs
-- [ ] RBAC, quotas, security event log
-- [ ] Isolation tests: a tenant must not be able to reach another's data by any path
+- [x] `tenant_id` end to end: API, events, Milvus rows (dynamic field, not
+      partitions); images are tracked per event, so no MinIO prefixes needed
+- [x] Credential storage (encrypted columns), never in logs
+- [x] RBAC, quotas, security event log
+- [x] Isolation tests: a tenant must not be able to reach another's data by any path
+- [x] Known persons per tenant (trt_api `feat/multi-tenant`), erasure on deletion
 
 Stage 3 — product
-- [ ] Edge agent packaged for clients, with a one-command install
-- [ ] Mobile app against the same API
+- [x] Edge agent with a one-command install
+- [ ] Edge agent image published to a registry
+- [x] Mobile API, handoff doc, demo server on the VPN
+- [ ] Mobile app (the Flutter developer, in progress)
+- [ ] Push sending (needs a Firebase project); production domain with HTTPS
 - [ ] Metering for billing (camera-hours, with and without faces)
 - [ ] Legal: processing agreement template, retention and deletion policy
 

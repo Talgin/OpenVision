@@ -1,6 +1,11 @@
 # OpenVision mobile app — API handoff for the Flutter developer
 
-Version 0.2 · 30.10.2026 · backend: `cloud_api/` in this repo
+Version 0.3 · 30.10.2026 · backend: `cloud_api/` in this repo
+
+**Changes since 0.2:** known persons (§13): enroll a face from a photo, list,
+rename, delete; events carry `person_name` (§6); new permissions
+`persons.read` / `persons.write` (§4); new error codes (§11). The demo server
+has 5 persons, and persons you enroll there show up in the simulated events.
 
 **Changes since 0.1** (your questions of 30.10):
 account deletion (§4); admins can set a team member's password (§12); new
@@ -35,6 +40,7 @@ backend; a web dashboard will use the same API.
 6. Event detail: face crop, full frame with the box drawn, time, camera
 7. Live: new events and camera status changes arrive without refreshing
 8. Team (admins only): list users, invite with a role, change role, remove
+8a. Known persons (face plan): list with photos, add from camera or gallery, rename, delete (§13)
 9. Register the device for push notifications (the sending side is Planned)
 
 ---
@@ -293,6 +299,8 @@ what the server enforces:
 | `events.read` | ✓ | ✓ | ✓ | ✓ | events, stats, live |
 | `cameras.control` | | ✓ | ✓ | ✓ | switch a camera on/off |
 | `cameras.write` | | | ✓ | ✓ | add / edit / delete cameras, edge agents |
+| `persons.read` | ✓ | ✓ | ✓ | ✓ | known persons list |
+| `persons.write` | | | ✓ | ✓ | add / rename / delete persons, replace the photo |
 | `users.read` / `users.write` | | | ✓ | ✓ | team screen |
 | `audit.read` | | | ✓ | ✓ | security log |
 | `account.write` | | | | ✓ | company settings (Planned) |
@@ -399,6 +407,7 @@ Errors: `not_found` (404; also for another company's camera id),
   "kind": "face",
   "occurred_at": "2026-10-29T08:15:30Z",
   "person_id": "0d6c2f1e-1111-2222-3333-444455556666",
+  "person_name": "Aigerim Sadykova",
   "is_known": true,
   "confidence": 0.87,
   "bbox": [640, 220, 96, 120],
@@ -412,8 +421,10 @@ Errors: `not_found` (404; also for another company's camera id),
 - `kind`: currently always `"face"`. Body / line-crossing events will add
   more kinds; show unknown kinds with a generic icon and don't crash.
 - `person_id`: a stable id for the same person across events. Unknown people
-  get an id too, so "seen 4 times today" works for them as well. Known
-  people's names are Planned (§10).
+  get an id too, so "seen 4 times today" works for them as well. For a known
+  person it is the person's `id` (§13).
+- `person_name`: the known person's name, `null` for unknown people and for
+  a person who has since been deleted. Show it instead of "Known person".
 - `is_known`: matched someone in the company's people list.
 - `confidence`: 0–1, `null` for unknown people. Show it as a percentage at most; don't make users read it.
 - `bbox`: `[x, y, width, height]` in **pixels of the full frame**. To draw it
@@ -637,7 +648,6 @@ So you don't build against things that don't exist:
 
 | feature | state |
 |---|---|
-| People list (upload a photo, name a person, `is_known` → name) | **Planned.** Events already carry `person_id`; names will come from a `/persons` API |
 | Live video / camera snapshot in the app | **Planned.** For now show the last event's frame as the camera's thumbnail |
 | Push sending | **Planned** (§9); device registration works now |
 | Forgot password by email / email verification | **Planned** (needs an email service). Until then an admin sets a new password (§12); on the sign-in screen, "Forgot password?" can say "ask your administrator" |
@@ -668,6 +678,11 @@ So you don't build against things that don't exist:
 | `not_push_camera` | 422 | rotate key | only push cameras have a key |
 | `invalid_cursor` | 400 | events, audit | drop the cursor, reload from the first page |
 | `invalid_range` | 422 | stats | since must be before until, at most 31 days apart |
+| `face_plan_required` | 403 | persons | the company's plan has no face recognition: hide the persons screen when `tenant.plan` is not `face` |
+| `face_service_unavailable` | 503 | persons | "Face recognition is unavailable right now, try again later" |
+| `no_face_found` | 422 | add person, replace photo | "No face found in the photo. Use a clear, front-facing photo" |
+| `invalid_photo` / `photo_too_large` | 422 | add person, replace photo | JPEG or PNG only, at most 5 MB (`details.limit` in bytes) |
+| `person_limit_reached` | 409 | add person | "Your plan allows N persons" (`details.limit`) |
 | `media_link_expired` | 403 | image URLs | re-fetch the event for fresh URLs |
 
 An unknown `code`: show a generic "Something went wrong" and log the code with the HTTP status.
@@ -695,7 +710,56 @@ Planned. Deactivating (`is_active: false`) signs the user out at once.
 
 ---
 
-## 13. Things to keep out of the app
+## 13. Known persons (face plan)
+
+A known person is a name plus one enrolled face photo. From the moment it is
+added, that face is recognised on the company's cameras, and its events have
+`is_known: true`, `person_id` = the person's `id`, and `person_name`.
+Only companies with `tenant.plan == "face"` have this; hide the screen
+otherwise.
+
+```
+GET    /api/v1/persons?q=&limit=&cursor=   → {"items": [person], "next_cursor"}   persons.read
+POST   /api/v1/persons      multipart: name, photo, note?   → 201 person         persons.write
+GET    /api/v1/persons/{id}                 → person                              persons.read
+PATCH  /api/v1/persons/{id}  {"name"?, "note"?}  → person                         persons.write
+PUT    /api/v1/persons/{id}/photo  multipart: photo  → person                    persons.write
+DELETE /api/v1/persons/{id}  → 204                                                 persons.write
+```
+
+```json
+{
+  "id": "0d6c2f1e-1111-2222-3333-444455556666",
+  "name": "Aigerim Sadykova",
+  "note": "night shift",
+  "photo_url": "https://api.../api/v1/media/eyJ...",
+  "media_expires_at": "2026-10-30T15:05:00Z",
+  "created_at": "2026-10-30T14:55:00Z"
+}
+```
+
+- The list is sorted by name, case-insensitively. `q` matches part of the
+  name. The cursor is opaque, as everywhere else.
+- `photo`: JPEG or PNG, at most 5 MB, one clear front-facing face. If there
+  are several faces, the largest-confidence one is used. Downscale on the
+  phone to about 1280 px on the long side before upload; that is plenty.
+- `photo_url` expires like event images (§6): re-fetch the person for a new
+  one, and cache the bytes, not the URL.
+- `note`: free text, `null` in PATCH clears it. `name` can't be null.
+- Replacing the photo: if the new one has no face (`no_face_found`), the
+  person is left **without** a photo and is not recognised until a good one
+  is uploaded. Say so in the error message.
+- Deleting erases the face and the photo for good. Past events keep the
+  `person_id` but lose the name.
+- Names and photos are personal data. Same rules as event images (§14).
+
+On the demo server enrollment stores the photo but nobody is really
+recognised: the simulator picks random persons of the company for its
+"known" events, including the ones you add.
+
+---
+
+## 14. Things to keep out of the app
 
 - No camera URLs, stream keys or agent tokens in logs, analytics or crash
   reports. They are credentials to someone's CCTV.
@@ -708,7 +772,7 @@ Planned. Deactivating (`is_active: false`) signs the user out at once.
 
 ---
 
-## 14. Questions
+## 15. Questions
 
 Backend: Talgat Islamgozhayev. When the API doesn't do what a screen needs,
 ask before working around it. Most changes on our side are small, and a
