@@ -1,0 +1,66 @@
+# Local demo for client-app development: API + fake events, no GPU, no cameras.
+#   docker compose -f deploy/docker-compose.demo.yml up --build
+# Secrets default to dev-only placeholders; a shared install passes real ones:
+#   docker compose -f deploy/docker-compose.demo.yml --env-file deploy/.env.vpn up -d
+# OV_API_BIND limits which address the API listens on (default: all).
+x-env: &env
+  OV_ENVIRONMENT: dev
+  OV_DATABASE_URL: postgresql+asyncpg://openvision:openvision@postgres:5432/openvision
+  OV_REDIS_URL: redis://redis:6379/0
+  OV_PIPELINE_REDIS_URL: redis://redis:6379/0
+  OV_JWT_SECRET: ${OV_JWT_SECRET:-demo-only-jwt-secret-change-me-0123456789}
+  OV_SECRETS_KEY: ${OV_SECRETS_KEY:-ZGVtby1vbmx5LWZlcm5ldC1rZXktMzJieXRlcyE9PT0=}
+  OV_INGEST_HOOK_SECRET: ${OV_INGEST_HOOK_SECRET:-demo-hook-secret}
+  OV_INGEST_INTERNAL_PASSWORD: ${OV_INGEST_INTERNAL_PASSWORD:-demo-internal}
+  OV_PLATFORM_TOKEN: ${OV_PLATFORM_TOKEN:-demo-platform-token}
+  OV_MEDIA_BACKEND: local
+  OV_MEDIA_LOCAL_DIR: /data/media
+  OV_PUBLIC_BASE_URL: ${OV_PUBLIC_BASE_URL:-http://localhost:8000}
+  OV_INGEST_PUBLIC_HOST: localhost
+  OV_DEFAULT_MAX_CAMERAS: "10"
+
+x-app: &app
+  build: ../cloud_api
+  image: openvision/cloud-api:dev
+  environment: *env
+  volumes: [media:/data/media]
+  restart: unless-stopped
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_started}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: openvision, POSTGRES_PASSWORD: openvision, POSTGRES_DB: openvision}
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U openvision"], interval: 2s, retries: 30}
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    <<: *app
+    ports: ["${OV_API_BIND:-0.0.0.0}:8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 3s
+      retries: 40
+
+  # workers start after the API has created the tables
+
+  bridge:
+    <<: *app
+    depends_on: {api: {condition: service_healthy}}
+    command: ["python", "-m", "src.workers.bridge"]
+
+  simulator:
+    <<: *app
+    depends_on: {api: {condition: service_healthy}}
+    command: ["sh", "-c", "python -m src.workers.demo seed && exec python -m src.workers.demo simulate"]
+
+volumes:
+  pg:
+  media:

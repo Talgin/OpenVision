@@ -1,0 +1,78 @@
+# OpenVision cloud side: ingest + API + scheduler + bridge.
+# GPU nodes (trt-streamer-pyservicemaker) and trt-processor run on the GPU
+# boxes and are registered with POST /internal/platform/gpu-nodes.
+#
+#   cp deploy/.env.example deploy/.env   # fill every secret
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+#
+# Public: 8890/udp (SRT push), 8554/tcp (RTSP push fallback), 8000 behind a TLS proxy.
+# Everything else stays on the internal network.
+x-env: &env
+  OV_ENVIRONMENT: prod
+  OV_DATABASE_URL: postgresql+asyncpg://openvision:${POSTGRES_PASSWORD}@postgres:5432/openvision
+  OV_REDIS_URL: redis://redis:6379/0
+  OV_PIPELINE_REDIS_URL: ${OV_PIPELINE_REDIS_URL}   # the Redis trt-processor writes filtered_events to
+  OV_JWT_SECRET: ${OV_JWT_SECRET}
+  OV_SECRETS_KEY: ${OV_SECRETS_KEY}
+  OV_INGEST_HOOK_SECRET: ${OV_INGEST_HOOK_SECRET}
+  OV_INGEST_INTERNAL_PASSWORD: ${OV_INGEST_INTERNAL_PASSWORD}
+  OV_PLATFORM_TOKEN: ${OV_PLATFORM_TOKEN}
+  OV_PUBLIC_BASE_URL: ${OV_PUBLIC_BASE_URL}
+  OV_INGEST_PUBLIC_HOST: ${OV_INGEST_PUBLIC_HOST}
+  # GPU boxes reach ingest by this address (not the docker-internal name)
+  OV_MEDIAMTX_INTERNAL_RTSP: ${OV_MEDIAMTX_INTERNAL_RTSP:-rtsp://mediamtx:8554}
+  OV_MEDIA_BACKEND: minio
+  OV_MINIO_ENDPOINT: ${OV_MINIO_ENDPOINT}
+  OV_MINIO_ACCESS_KEY: ${OV_MINIO_ACCESS_KEY}
+  OV_MINIO_SECRET_KEY: ${OV_MINIO_SECRET_KEY}
+  OV_CORS_ORIGINS: ${OV_CORS_ORIGINS}
+
+x-app: &app
+  build: ../cloud_api
+  image: openvision/cloud-api:0.1.0
+  environment: *env
+  restart: unless-stopped
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_started}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: openvision, POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}", POSTGRES_DB: openvision}
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U openvision"], interval: 2s, retries: 30}
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    <<: *app
+    ports: ["127.0.0.1:8000:8000"]   # put nginx/caddy with TLS in front
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      retries: 30
+
+  scheduler:
+    <<: *app
+    command: ["python", "-m", "src.workers.scheduler"]
+    depends_on: {api: {condition: service_healthy}, mediamtx: {condition: service_started}}
+
+  bridge:
+    <<: *app
+    command: ["python", "-m", "src.workers.bridge"]
+    depends_on: {api: {condition: service_healthy}}
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.9.3
+    environment:
+      MTX_AUTHHTTPADDRESS: http://api:8000/internal/ingest/auth?secret=${OV_INGEST_HOOK_SECRET}
+    volumes: ["../ingest/mediamtx.yml:/mediamtx.yml:ro"]
+    ports: ["8554:8554", "8890:8890/udp"]
+    restart: unless-stopped
+
+volumes:
+  pg:

@@ -1,0 +1,35 @@
+# OpenVision ingest (mediamtx 1.9). Every camera becomes path cam/<id>;
+# paths are created at runtime by the scheduler through the control API,
+# so there are none here and publishing to an unknown path fails.
+#
+# Who may do what is decided by cloud_api /internal/ingest/auth.
+# Set MTX_AUTHHTTPADDRESS in the environment (it carries ?secret=...),
+# e.g. http://api:8000/internal/ingest/auth?secret=<OV_INGEST_HOOK_SECRET>
+
+logLevel: info
+
+authMethod: http
+authHTTPAddress: http://api:8000/internal/ingest/auth
+# mediamtx's default skips auth for api/metrics/pprof; we want the hook to see everything
+authHTTPExclude: []
+
+api: yes
+apiAddress: :9997        # internal network only
+metrics: yes
+metricsAddress: :9998    # internal network only
+
+rtsp: yes
+rtspAddress: :8554       # public: RTSP push fallback; internal: worker reads
+protocols: [tcp]
+rtmp: no
+hls: no
+webrtc: no
+
+srt: yes
+srtAddress: :8890        # public (UDP): preferred push transport
+
+pathDefaults:
+  # a publisher replacing a live one (camera reconnect) takes over the path
+  overridePublisher: yes
+
+paths: {}

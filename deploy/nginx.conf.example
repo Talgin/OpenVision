@@ -1,0 +1,46 @@
+# TLS front for cloud_api (deploy/docker-compose.yml binds the API to 127.0.0.1:8000).
+# Copy into /etc/nginx/sites-available/, set the domain, get a certificate
+# (certbot --nginx -d api.openvision.kz).
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ""      close;
+}
+
+server {
+    listen 80;
+    server_name api.openvision.kz;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name api.openvision.kz;
+
+    ssl_certificate     /etc/letsencrypt/live/api.openvision.kz/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.openvision.kz/privkey.pem;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    client_max_body_size 2m;
+
+    # ingest auth hook and staff endpoints: reachable only on the docker network
+    location /internal/ { return 404; }
+
+    location /api/v1/live {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;   # server pings every 25 s
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

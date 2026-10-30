@@ -1,0 +1,11 @@
+# local clones of the repos this builds on (each is its own git repo)
+upstream/
+cloud_api/.wheels/
+__pycache__/
+.pytest_cache/
+.env
+*.db
+
+# filled env files for real installs
+deploy/.env*
+!deploy/.env.example
